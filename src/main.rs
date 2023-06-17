@@ -1,6 +1,6 @@
 use reqwest::{
     blocking::{Client, Response},
-    header::CONTENT_TYPE,
+    header::{AUTHORIZATION, CONTENT_TYPE},
     Method,
 };
 use std::{
@@ -22,15 +22,25 @@ fn main() {
         handle_connection(stream, &client);
     }
 }
-fn req(method: String, path: String, client: &Client) -> Response {
-    let r = client
-        .request(
-            Method::from_str(&method).unwrap(),
-            "https://api.spacetraders.io/v2/".to_owned() + &path,
-        )
-        .send()
-        .unwrap();
-    return r;
+fn req(method: String, path: String, client: &Client, auth: String) -> Response {
+    if auth != "".to_owned() {
+        return client
+            .request(
+                Method::from_str(&method).unwrap(),
+                "https://api.spacetraders.io/v2/".to_owned() + &path,
+            )
+            .header(AUTHORIZATION, auth)
+            .send()
+            .unwrap();
+    } else {
+        return client
+            .request(
+                Method::from_str(&method).unwrap(),
+                "https://api.spacetraders.io/v2/".to_owned() + &path,
+            )
+            .send()
+            .unwrap();
+    };
 }
 fn handle_connection(mut stream: TcpStream, client: &Client) {
     let buf_reader = BufReader::new(&mut stream);
@@ -40,14 +50,29 @@ fn handle_connection(mut stream: TcpStream, client: &Client) {
         .take_while(|line| !line.is_empty())
         .collect();
 
-    let req_line = &http_request[0];
-    let split:Vec<&str> = req_line.split(" ").collect();
+    println!("Request: {:#?}", http_request.to_owned());
+    let req_line = &http_request[0].to_owned();
+    let split: Vec<&str> = req_line.split(" ").collect();
     let method = split[0];
     let path = split[1];
+    let auth = false;
+    let mut bearer = "".to_owned();
+    for line in http_request {
+        let l = line.to_owned();
+        let s: Vec<&str> = l.split(": ").collect();
+        println!("{}", s[0]);
+        if s[0] == "Authorization" {
+            bearer = s[1].to_owned();
+        }
+    }
 
-    println!("Request: {:#?}", http_request);
     let now = Instant::now();
-    let r = req(method.to_owned(), path.to_owned(), client);
+    let r = req(
+        method.to_owned(),
+        path.to_owned(),
+        client,
+        bearer.to_owned(),
+    );
 
     let status = r.status().to_string();
     let clen = r.content_length().unwrap().to_string();
