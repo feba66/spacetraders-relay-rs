@@ -22,25 +22,16 @@ fn main() {
         handle_connection(stream, &client);
     }
 }
-fn req(method: String, path: String, client: &Client, auth: String) -> Response {
-    if auth != "".to_owned() {
-        return client
-            .request(
-                Method::from_str(&method).unwrap(),
-                "https://api.spacetraders.io/v2/".to_owned() + &path,
-            )
-            .header(AUTHORIZATION, auth)
-            .send()
-            .unwrap();
-    } else {
-        return client
-            .request(
-                Method::from_str(&method).unwrap(),
-                "https://api.spacetraders.io/v2/".to_owned() + &path,
-            )
-            .send()
-            .unwrap();
-    };
+fn req(method: String, path: String, client: &Client, auth: Option<String>) -> Response {
+    let mut req = client.request(
+        Method::from_str(&method).unwrap(),
+        "https://api.spacetraders.io/v2/".to_owned() + &path,
+    );
+    if let Some(_) = auth {
+        req = req.header(AUTHORIZATION, auth.unwrap());
+    }
+
+    return req.send().unwrap();
 }
 fn handle_connection(mut stream: TcpStream, client: &Client) {
     let buf_reader = BufReader::new(&mut stream);
@@ -55,14 +46,13 @@ fn handle_connection(mut stream: TcpStream, client: &Client) {
     let split: Vec<&str> = req_line.split(" ").collect();
     let method = split[0];
     let path = split[1];
-    let auth = false;
-    let mut bearer = "".to_owned();
+    let mut bearer: Option<String> = None;
     for line in http_request {
         let l = line.to_owned();
         let s: Vec<&str> = l.split(": ").collect();
         println!("{}", s[0]);
         if s[0] == "Authorization" {
-            bearer = s[1].to_owned();
+            bearer = Some(s[1].to_owned());
         }
     }
 
@@ -71,7 +61,7 @@ fn handle_connection(mut stream: TcpStream, client: &Client) {
         method.to_owned(),
         path.to_owned(),
         client,
-        bearer.to_owned(),
+        bearer,
     );
 
     let status = r.status().to_string();
