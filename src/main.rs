@@ -1,9 +1,8 @@
-use hyper::body::HttpBody as _;
 use hyper::client::connect::HttpConnector;
-use hyper::header::{AUTHORIZATION, CONTENT_LENGTH, CONTENT_TYPE};
+use hyper::header::{AUTHORIZATION, CONTENT_TYPE};
 use hyper::server::conn::AddrStream;
 use hyper::service::{make_service_fn, service_fn};
-use hyper::{body, Body, Client, HeaderMap, Method, Request, Response, Server, Uri};
+use hyper::{Body, Client, HeaderMap, Method, Request, Response, Server};
 use hyper_tls::HttpsConnector;
 use std::convert::Infallible;
 use std::net::SocketAddr;
@@ -24,7 +23,7 @@ async fn st_req(
     // let bbtes = hyper::body::to_bytes(b);
     let mut r = Request::builder()
         .method(method)
-        .uri(GAME_SERVER_URL.to_owned() + &path);
+        .uri(GAME_SERVER_URL.to_owned() + path);
     if headers.contains_key(AUTHORIZATION) {
         r = r.header(AUTHORIZATION, headers.get(AUTHORIZATION).unwrap());
     }
@@ -34,7 +33,7 @@ async fn st_req(
     let req = r.body(body).unwrap();
     let response = client.request(req);
 
-    return response.await.unwrap();
+    response.await.unwrap()
 }
 
 async fn handle(
@@ -42,7 +41,6 @@ async fn handle(
     _addr: SocketAddr,
     req: Request<Body>,
 ) -> Result<Response<Body>, Infallible> {
-
     let method = req.method().clone();
     let path = req.uri().path().to_owned();
     let headers = req.headers().clone();
