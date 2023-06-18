@@ -4,6 +4,7 @@ use hyper::server::conn::AddrStream;
 use hyper::service::{make_service_fn, service_fn};
 use hyper::{Body, Client, HeaderMap, Method, Request, Response, Server};
 use hyper_tls::HttpsConnector;
+use std::cmp::min;
 // use ratelimit::Ratelimiter;
 use std::convert::Infallible;
 use std::net::SocketAddr;
@@ -16,7 +17,8 @@ use ratelimit::Ratelimiter;
 #[derive(Clone)]
 struct AppContext {
     client: Client<HttpsConnector<HttpConnector>>,
-    ratelimiter: Arc<Ratelimiter>,
+    ratelimiter_static: Arc<Ratelimiter>,
+    ratelimiter_burst: Arc<Ratelimiter>,
 }
 
 async fn st_req(
@@ -25,7 +27,8 @@ async fn st_req(
     headers: &HeaderMap,
     body: Body,
     client: Client<HttpsConnector<HttpConnector>>,
-    rl: Arc<Ratelimiter>,
+    rl1: Arc<Ratelimiter>,
+    rl2: Arc<Ratelimiter>,
 ) -> Response<Body> {
     let mut r = Request::builder()
         .method(method)
@@ -38,8 +41,12 @@ async fn st_req(
     }
     let req = r.body(body).unwrap();
     loop {
-        if let Err(sleep) = rl.try_wait() {
-            tokio::time::sleep(sleep).await;
+        if let Err(sleep1) = rl1.try_wait() {
+            if let Err(sleep2) = rl2.try_wait() {
+                tokio::time::sleep(min(sleep1, sleep2)).await;
+            } else{
+                break;
+            }
         } else{
             break;
         }
@@ -64,7 +71,8 @@ async fn handle(
         &headers,
         req.into_body(),
         context.client,
-        context.ratelimiter,
+        context.ratelimiter_static,
+        context.ratelimiter_burst,
     )
     .await;
     // Ok(Response::new(format!("{method} {path}\n").into()));
@@ -78,7 +86,13 @@ async fn main() {
     let https = HttpsConnector::new();
     let context = AppContext {
         client: Client::builder().build::<_, hyper::Body>(https),
-        ratelimiter: Arc::new(
+        ratelimiter_static: Arc::new(
+            Ratelimiter::builder(2, Duration::from_secs(1))
+                .max_tokens(2)
+                .build()
+                .unwrap(),
+        ),
+        ratelimiter_burst: Arc::new(
             Ratelimiter::builder(10, Duration::from_secs(10))
                 .max_tokens(10)
                 .build()
