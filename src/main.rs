@@ -4,13 +4,19 @@ use hyper::server::conn::AddrStream;
 use hyper::service::{make_service_fn, service_fn};
 use hyper::{Body, Client, HeaderMap, Method, Request, Response, Server};
 use hyper_tls::HttpsConnector;
+// use ratelimit::Ratelimiter;
 use std::convert::Infallible;
 use std::net::SocketAddr;
+use std::sync::Arc;
+use std::time::Duration;
 const GAME_SERVER_URL: &str = "https://api.spacetraders.io/v2/";
+pub mod ratelimit;
+use ratelimit::Ratelimiter;
 
 #[derive(Clone)]
 struct AppContext {
     client: Client<HttpsConnector<HttpConnector>>,
+    ratelimiter: Arc<Ratelimiter>,
 }
 
 async fn st_req(
@@ -19,8 +25,8 @@ async fn st_req(
     headers: &HeaderMap,
     body: Body,
     client: Client<HttpsConnector<HttpConnector>>,
+    rl: Arc<Ratelimiter>,
 ) -> Response<Body> {
-    // let bbtes = hyper::body::to_bytes(b);
     let mut r = Request::builder()
         .method(method)
         .uri(GAME_SERVER_URL.to_owned() + path);
@@ -31,6 +37,13 @@ async fn st_req(
         r = r.header(CONTENT_TYPE, headers.get(CONTENT_TYPE).unwrap());
     }
     let req = r.body(body).unwrap();
+    loop {
+        if let Err(sleep) = rl.try_wait() {
+            tokio::time::sleep(sleep).await;
+        } else{
+            break;
+        }
+    }
     let response = client.request(req);
 
     response.await.unwrap()
@@ -45,7 +58,15 @@ async fn handle(
     let path = req.uri().path().to_owned();
     let headers = req.headers().clone();
 
-    let r = st_req(&method, &path, &headers, req.into_body(), context.client).await;
+    let r = st_req(
+        &method,
+        &path,
+        &headers,
+        req.into_body(),
+        context.client,
+        context.ratelimiter,
+    )
+    .await;
     // Ok(Response::new(format!("{method} {path}\n").into()));
 
     Ok(r)
@@ -57,6 +78,12 @@ async fn main() {
     let https = HttpsConnector::new();
     let context = AppContext {
         client: Client::builder().build::<_, hyper::Body>(https),
+        ratelimiter: Arc::new(
+            Ratelimiter::builder(10, Duration::from_secs(10))
+                .max_tokens(10)
+                .build()
+                .unwrap(),
+        ),
     };
 
     // A `MakeService` that produces a `Service` to handle each connection.

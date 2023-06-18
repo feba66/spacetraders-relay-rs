@@ -9,3 +9,8 @@ edition = "2021"
 hyper = { version = "0.14", features = ["full"] }
 hyper-tls = "0.5"
 tokio = { version = "1", features = ["full"] }
+# chrono = "0.4"
+# ratelimit = "0.7"
+clocksource="0.6.0"
+parking_lot="0.12.1"
+thiserror="1.0.40"
