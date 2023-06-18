@@ -1,84 +1,89 @@
-use reqwest::{
-    blocking::{Client, Response},
-    header::{AUTHORIZATION, CONTENT_TYPE},
-    Method,
-};
-use std::{
-    io::{prelude::*, BufReader},
-    net::{TcpListener, TcpStream},
-    str::FromStr,
-    time::Instant,
-};
-fn main() {
-    let client = Client::builder()
-        .user_agent("SpaceTraders-Relay-rs")
-        .build()
-        .unwrap();
-    let listener = TcpListener::bind("0.0.0.0:8042").unwrap();
+use hyper::body::HttpBody as _;
+use hyper::client::connect::HttpConnector;
+use hyper::header::{AUTHORIZATION, CONTENT_LENGTH, CONTENT_TYPE};
+use hyper::server::conn::AddrStream;
+use hyper::service::{make_service_fn, service_fn};
+use hyper::{body, Body, Client, HeaderMap, Method, Request, Response, Server, Uri};
+use hyper_tls::HttpsConnector;
+use std::convert::Infallible;
+use std::net::SocketAddr;
+const GAME_SERVER_URL: &str = "https://api.spacetraders.io/v2/";
 
-    for stream in listener.incoming() {
-        let stream = stream.unwrap();
-
-        handle_connection(stream, &client);
-    }
+#[derive(Clone)]
+struct AppContext {
+    client: Client<HttpsConnector<HttpConnector>>,
 }
-fn req(method: String, path: String, client: &Client, auth: Option<String>) -> Response {
-    let mut req = client.request(
-        Method::from_str(&method).unwrap(),
-        "https://api.spacetraders.io/v2/".to_owned() + &path,
-    );
-    if let Some(_) = auth {
-        req = req.header(AUTHORIZATION, auth.unwrap());
-    }
 
-    return req.send().unwrap();
+async fn st_req(
+    method: &Method,
+    path: &String,
+    headers: &HeaderMap,
+    body: Body,
+    client: Client<HttpsConnector<HttpConnector>>,
+) -> Response<Body> {
+    // let bbtes = hyper::body::to_bytes(b);
+    let mut r = Request::builder()
+        .method(method)
+        .uri(GAME_SERVER_URL.to_owned() + &path);
+    if headers.contains_key(AUTHORIZATION) {
+        r = r.header(AUTHORIZATION, headers.get(AUTHORIZATION).unwrap());
+    }
+    if headers.contains_key(CONTENT_TYPE) {
+        r = r.header(CONTENT_TYPE, headers.get(CONTENT_TYPE).unwrap());
+    }
+    let req = r.body(body).unwrap();
+    let response = client.request(req);
+
+    return response.await.unwrap();
 }
-fn handle_connection(mut stream: TcpStream, client: &Client) {
-    let buf_reader = BufReader::new(&mut stream);
-    let http_request: Vec<_> = buf_reader
-        .lines()
-        .map(|result| result.unwrap())
-        .take_while(|line| !line.is_empty())
-        .collect();
 
-    println!("Request: {:#?}", http_request.to_owned());
-    let req_line = &http_request[0].to_owned();
-    let split: Vec<&str> = req_line.split(" ").collect();
-    let method = split[0];
-    let path = split[1];
-    let mut bearer: Option<String> = None;
-    for line in http_request {
-        let l = line.to_owned();
-        let s: Vec<&str> = l.split(": ").collect();
-        println!("{}", s[0]);
-        if s[0] == "Authorization" {
-            bearer = Some(s[1].to_owned());
-        }
+async fn handle(
+    context: AppContext,
+    _addr: SocketAddr,
+    req: Request<Body>,
+) -> Result<Response<Body>, Infallible> {
+
+    let method = req.method().clone();
+    let path = req.uri().path().to_owned();
+    let headers = req.headers().clone();
+
+    let r = st_req(&method, &path, &headers, req.into_body(), context.client).await;
+    // Ok(Response::new(format!("{method} {path}\n").into()));
+
+    Ok(r)
+    // Ok(Response::new(Body::from("Hello World")))
+}
+
+#[tokio::main]
+async fn main() {
+    let https = HttpsConnector::new();
+    let context = AppContext {
+        client: Client::builder().build::<_, hyper::Body>(https),
+    };
+
+    // A `MakeService` that produces a `Service` to handle each connection.
+    let make_service = make_service_fn(move |conn: &AddrStream| {
+        // We have to clone the context to share it with each invocation of
+        // `make_service`. If your data doesn't implement `Clone` consider using
+        // an `std::sync::Arc`.
+        let context = context.clone();
+
+        // You can grab the address of the incoming connection like so.
+        let addr = conn.remote_addr();
+
+        // Create a `Service` for responding to the request.
+        let service = service_fn(move |req| handle(context.clone(), addr, req));
+
+        // Return the service to hyper.
+        async move { Ok::<_, Infallible>(service) }
+    });
+
+    // Run the server like above...
+    let addr = SocketAddr::from(([0, 0, 0, 0], 8042));
+
+    let server = Server::bind(&addr).serve(make_service);
+
+    if let Err(e) = server.await {
+        eprintln!("server error: {}", e);
     }
-
-    let now = Instant::now();
-    let r = req(
-        method.to_owned(),
-        path.to_owned(),
-        client,
-        bearer,
-    );
-
-    let status = r.status().to_string();
-    let clen = r.content_length().unwrap().to_string();
-    let content_type = r
-        .headers()
-        .get(CONTENT_TYPE)
-        .unwrap()
-        .to_str()
-        .unwrap()
-        .to_string();
-
-    let content = r.text().unwrap();
-    let response = format!("HTTP/1.1 {status}\r\ncontent-type: {content_type}\r\ncontent-length: {clen}\r\n\r\n{content}", );
-
-    let elapsed_time = now.elapsed();
-    println!("Request took {} seconds.", elapsed_time.as_secs_f32());
-    println!("{}", response);
-    stream.write_all(response.as_bytes()).unwrap();
 }
