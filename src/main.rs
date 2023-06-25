@@ -33,6 +33,7 @@ async fn st_req(
     let mut r = Request::builder()
         .method(method)
         .uri(GAME_SERVER_URL.to_owned() + path);
+    // println!("{}",path);
     if headers.contains_key(AUTHORIZATION) {
         r = r.header(AUTHORIZATION, headers.get(AUTHORIZATION).unwrap());
     }
@@ -62,9 +63,9 @@ async fn handle(
     req: Request<Body>,
 ) -> Result<Response<Body>, Infallible> {
     let method = req.method().clone();
-    let path = req.uri().path().to_owned();
+    let path = req.uri().path_and_query().unwrap().as_str().to_owned();
     let headers = req.headers().clone();
-
+    // println!("{}",req.uri().path_and_query().unwrap().as_str().to_owned());
     let r = st_req(
         &method,
         &path,
@@ -76,7 +77,7 @@ async fn handle(
     )
     .await;
     // Ok(Response::new(format!("{method} {path}\n").into()));
-
+    
     Ok(r)
     // Ok(Response::new(Body::from("Hello World")))
 }
