@@ -1,5 +1,5 @@
 use hyper::client::connect::HttpConnector;
-use hyper::header::{AUTHORIZATION, CONTENT_TYPE};
+use hyper::header::{AUTHORIZATION, CONTENT_TYPE, CONTENT_LENGTH};
 use hyper::server::conn::AddrStream;
 use hyper::service::{make_service_fn, service_fn};
 use hyper::{Body, Client, HeaderMap, Method, Request, Response, Server};
@@ -39,6 +39,9 @@ async fn st_req(
     }
     if headers.contains_key(CONTENT_TYPE) {
         r = r.header(CONTENT_TYPE, headers.get(CONTENT_TYPE).unwrap());
+    }
+    if headers.contains_key(CONTENT_LENGTH) {
+        r = r.header(CONTENT_LENGTH, headers.get(CONTENT_LENGTH).unwrap());
     }
     let req = r.body(body).unwrap();
     loop {
